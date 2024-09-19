@@ -1,23 +1,38 @@
-#include <DHT.h>
+// Definir o pino analógico onde o sensor de umidade do solo está conectado
+const int sensorPin = A0;
 
-#define DHTPIN 2          // Pino de dados do sensor DHT
-#define DHTTYPE DHT11     // Tipo do sensor (DHT11 ou DHT22)
+// Definir o pino do relé onde a bomba está conectada
+const int bombaPin = 7;
 
-DHT dht(DHTPIN, DHTTYPE);
+// Variável para armazenar o valor lido do sensor
+int sensorValue = 0;
 
 void setup() {
+  // Iniciar a comunicação serial a 9600 bps
   Serial.begin(9600);
-  dht.begin();
+  // Configurar o pino da bomba como saída
+  pinMode(bombaPin, OUTPUT);
 }
 
 void loop() {
-  float temperature = dht.readTemperature(); // Lê a temperatura em Celsius
+  // Ler o valor analógico do sensor de umidade do solo
+  sensorValue = analogRead(sensorPin);
+  // Mapear os valores: 302 (seco) -> 0% e 172 (molhado) -> 100%
+  int humidityPercent = map(sensorValue, 1023, 580, 0, 100);
 
-  if (isnan(temperature)) {
-    Serial.println("Erro ao ler o sensor.");
+  // Limitar os valores entre 0% e 100% para evitar valores fora da faixa
+  humidityPercent = constrain(humidityPercent, 0, 100);
+
+  // Exibir o valor do sensor no monitor serial
+  Serial.println(humidityPercent);
+
+  // Condição para ativar a bomba se a umidade estiver abaixo de um certo nível
+  if (humidityPercent <= 30) {  // Defina o nível de umidade que você deseja
+    digitalWrite(bombaPin, HIGH); // Ativar a bomba
   } else {
-    Serial.println(temperature);
+    digitalWrite(bombaPin, LOW);
   }
 
-  delay(5000); // Aguarda 5 segundos antes de ler novamente
+  // Aguardar um pouco antes da próxima leitura
+  delay(1000);
 }

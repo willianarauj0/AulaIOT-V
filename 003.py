@@ -1,5 +1,4 @@
 from datetime import datetime, timedelta
-
 import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 import numpy as np
@@ -7,20 +6,21 @@ import serial
 from sklearn.linear_model import LinearRegression
 
 # Configuração da porta serial
-ser = serial.Serial('COM3', 9600)  # Substitua 'COM3' pela porta correta do Arduino
+ser = serial.Serial('COM5', 9600)
 
-# Função para ler dados de temperatura do Arduino
-def read_temperature_from_arduino():
+# Função para ler dados de umidade do Arduino
+def read_humidity_from_arduino():
     if ser.in_waiting > 0:
         line = ser.readline().decode('utf-8').strip()
+        print(f"Lido: {line}")  # Para depuração
         try:
-            return float(line)
+            return float(line) + float(1)  # Ajuste se necessário
         except ValueError:
             return None
     return None
 
-# Função para prever a próxima temperatura
-def predict_next_temperature(model, X):
+# Função para prever a próxima umidade
+def predict_next_humidity(model, X):
     future_time = np.array([[X[-1][0] + 60]])  # Prevendo a próxima hora (60 minutos)
     return model.predict(future_time)[0]
 
@@ -29,56 +29,77 @@ start_time = datetime.now()
 num_points = 12  # 1 hora com intervalo de 5 minutos
 interval_minutes = 5
 
-current_times = [start_time + timedelta(minutes=i * interval_minutes) for i in range(num_points)]
-current_temps = [read_temperature_from_arduino() for _ in range(num_points)]
+current_times = []
+current_humidities = []
+future_times = []
+future_humidities = []
 
-# Remover valores nulos
-current_times = [t for t, temp in zip(current_times, current_temps) if temp is not None]
-current_temps = [temp for temp in current_temps if temp is not None]
+# Coletar leituras de umidade iniciais
+for _ in range(num_points):
+    humidity = read_humidity_from_arduino()
+    if humidity is not None:
+        current_humidities.append(humidity)
+        current_times.append(start_time + timedelta(minutes=len(current_times) * interval_minutes))
 
-# Treinar um modelo simples para previsão usando temperaturas atuais
-X = np.array([(i * interval_minutes) for i in range(len(current_temps))]).reshape(-1, 1)
-y = np.array(current_temps)
-model = LinearRegression().fit(X, y)
+# Inicializar o modelo se houver dados suficientes
+model = None
+if len(current_humidities) > 1:
+    X = np.array([(i * interval_minutes) for i in range(len(current_humidities))]).reshape(-1, 1)
+    y = np.array(current_humidities)
+    model = LinearRegression().fit(X, y)
 
 # Configurar o gráfico
 fig, ax = plt.subplots()
-line1, = ax.plot(current_times, current_temps, label='Temperaturas Atuais')
-line2, = ax.plot([], [], label='Temperaturas Futuras')
+line1, = ax.plot(current_times, current_humidities, label='Umidade Atual', color='blue')  # Linha de umidade atual
+line2, = ax.plot([], [], label='Umidade Prevista', color='orange')  # Linha de umidade prevista
 ax.legend()
 ax.set_xlabel('Tempo')
-ax.set_ylabel('Temperatura (°C)')
-ax.set_title('Temperatura Futuras e Atuais')
+ax.set_ylabel('Umidade (%)')
+ax.set_title('Umidade Futuras e Atuais')
 
 def update_plot(frame):
-    # Atualiza as temperaturas atuais
-    new_temp = read_temperature_from_arduino()
-    if new_temp is not None:
-        new_time = current_times[-1] + timedelta(minutes=interval_minutes)
+    global model  # Declare model as global
+
+    new_humidity = read_humidity_from_arduino()
+    if new_humidity is not None:
+        # Atualiza o tempo e a umidade atuais
+        if current_times:
+            new_time = current_times[-1] + timedelta(minutes=interval_minutes)
+        else:
+            new_time = datetime.now()
+
         current_times.append(new_time)
-        current_temps.append(new_temp)
-        
-        # Treinar o modelo com novas temperaturas atuais
-        X_new = np.array([(i * interval_minutes) for i in range(len(current_temps))]).reshape(-1, 1)
-        y_new = np.array(current_temps)
-        model.fit(X_new, y_new)
-        
-        line1.set_xdata(current_times)
-        line1.set_ydata(current_temps)
-        
-        # Prever a próxima temperatura
-        next_temp = predict_next_temperature(model, X_new)
-        future_time = current_times[-1] + timedelta(minutes=interval_minutes)
-        current_times.append(future_time)
-        current_temps.append(next_temp)
-        
-        line2.set_xdata(current_times)
-        line2.set_ydata(current_temps)
-    
+        current_humidities.append(new_humidity)
+
+        # Treinar o modelo se houver dados suficientes
+        if model is None and len(current_humidities) > 1:
+            X_new = np.array([(i * interval_minutes) for i in range(len(current_humidities))]).reshape(-1, 1)
+            y_new = np.array(current_humidities)
+            model = LinearRegression().fit(X_new, y_new)
+        elif model is not None:
+            X_new = np.array([(i * interval_minutes) for i in range(len(current_humidities))]).reshape(-1, 1)
+            y_new = np.array(current_humidities)
+            model.fit(X_new, y_new)
+
+            # Atualiza a linha de umidade atual
+            line1.set_xdata(current_times)
+            line1.set_ydata(current_humidities)
+
+            # Prever a próxima umidade
+            next_humidity = predict_next_humidity(model, X_new)
+            future_time = current_times[-1] + timedelta(minutes=interval_minutes)
+            future_times.append(future_time)
+            future_humidities.append(next_humidity)
+            current_times.append(new_time)
+            current_humidities.append(new_humidity)
+            # Atualiza a linha de umidade prevista
+            line2.set_xdata(future_times)
+            line2.set_ydata(future_humidities)
+
     # Atualiza o gráfico
     ax.relim()
     ax.autoscale_view()
-    
+
     return line1, line2
 
 # Configura a animação
